@@ -1,52 +1,53 @@
+import os
+from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, Field
-# Fix: Remove the dots (..) because database.py is in the same parent folder (src)
-from database import SessionLocal
-import crud
-import schemas
 
-API_KEY = "armoriq_secure_key_2025"
+# ✅ RELATIVE IMPORTS (CRITICAL FIX)
+from ..database import SessionLocal
+from .. import crud, schemas
+
+# Load environment variables
+load_dotenv()
+
+API_KEY = os.getenv("MCP_API_KEY")
+
+if not API_KEY:
+    raise RuntimeError("MCP_API_KEY not found in .env file")
 
 mcp = FastMCP("ArmorIQ-Banking-Tools")
 
-# ---------- Input Schemas (Strict & Typed) ----------
+# ---------- Input Schemas ----------
 
 class AuthBase(BaseModel):
-    api_key: str = Field(..., description="Security key for tool access")
+    api_key: str = Field(..., description="API key for tool authorization")
 
 class CreateAccountInput(AuthBase):
-    name: str = Field(..., min_length=1, max_length=50, description="Owner name")
+    name: str = Field(..., min_length=1, max_length=50)
     initial_deposit: float = Field(default=0.0, ge=0)
 
 class AccountLookupInput(AuthBase):
-    account_id: int = Field(..., ge=1, description="Bank account ID")
+    account_id: int = Field(..., ge=1)
 
-# ---------- Helper Functions ----------
+# ---------- Authorization ----------
 
-def _authorize(api_key: str):
-    if api_key != API_KEY:
-        return False
-    return True
+def authorize(api_key: str) -> bool:
+    return api_key == API_KEY
 
 # ---------- MCP Tools ----------
 
 @mcp.tool()
 def create_new_account(input_data: CreateAccountInput) -> dict:
-    """
-    Securely creates a new bank account.
-    Returns structured output to prevent prompt injection.
-    """
-    if not _authorize(input_data.api_key):
-        return {"status": "error", "message": "Unauthorized access"}
+    """Creates a new bank account securely."""
+    if not authorize(input_data.api_key):
+        return {"status": "error", "message": "Unauthorized"}
 
     db = SessionLocal()
     try:
-        safe_name = input_data.name.strip()
-
         account = crud.create_account(
             db,
             schemas.AccountCreate(
-                owner_name=safe_name,
+                owner_name=input_data.name.strip(),
                 initial_balance=float(input_data.initial_deposit),
             ),
         )
@@ -54,7 +55,7 @@ def create_new_account(input_data: CreateAccountInput) -> dict:
         return {
             "status": "success",
             "account_id": int(account.id),
-            "owner_name": safe_name,
+            "owner_name": account.owner_name,
         }
     finally:
         db.close()
@@ -62,12 +63,9 @@ def create_new_account(input_data: CreateAccountInput) -> dict:
 
 @mcp.tool()
 def check_balance(input_data: AccountLookupInput) -> dict:
-    """
-    Retrieves account balance securely.
-    Structured response avoids unescaped variables.
-    """
-    if not _authorize(input_data.api_key):
-        return {"status": "error", "message": "Unauthorized access"}
+    """Returns account balance using structured output."""
+    if not authorize(input_data.api_key):
+        return {"status": "error", "message": "Unauthorized"}
 
     db = SessionLocal()
     try:
