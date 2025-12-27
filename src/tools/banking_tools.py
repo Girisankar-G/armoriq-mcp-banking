@@ -1,58 +1,84 @@
 from mcp.server.fastmcp import FastMCP
+from pydantic import BaseModel, Field
+# Fix: Remove the dots (..) because database.py is in the same parent folder (src)
 from database import SessionLocal
-import crud, schemas
+import crud
+import schemas
 
-# Initialize FastMCP for tool registration
-mcp = FastMCP("Banking-Tools")
+API_KEY = "armoriq_secure_key_2025"
+
+mcp = FastMCP("ArmorIQ-Banking-Tools")
+
+# ---------- Input Schemas (Strict & Typed) ----------
+
+class AuthBase(BaseModel):
+    api_key: str = Field(..., description="Security key for tool access")
+
+class CreateAccountInput(AuthBase):
+    name: str = Field(..., min_length=1, max_length=50, description="Owner name")
+    initial_deposit: float = Field(default=0.0, ge=0)
+
+class AccountLookupInput(AuthBase):
+    account_id: int = Field(..., ge=1, description="Bank account ID")
+
+# ---------- Helper Functions ----------
+
+def _authorize(api_key: str):
+    if api_key != API_KEY:
+        return False
+    return True
+
+# ---------- MCP Tools ----------
 
 @mcp.tool()
-def create_new_account(name: str, initial_deposit: float = 0.0):
-    """Creates a new bank account for a user."""
+def create_new_account(input_data: CreateAccountInput) -> dict:
+    """
+    Securely creates a new bank account.
+    Returns structured output to prevent prompt injection.
+    """
+    if not _authorize(input_data.api_key):
+        return {"status": "error", "message": "Unauthorized access"}
+
     db = SessionLocal()
     try:
-        account_data = schemas.AccountCreate(owner_name=name, initial_balance=initial_deposit)
-        new_account = crud.create_account(db, account_data)
-        return f"Account created for {name} with ID: {new_account.id}"
+        safe_name = input_data.name.strip()
+
+        account = crud.create_account(
+            db,
+            schemas.AccountCreate(
+                owner_name=safe_name,
+                initial_balance=float(input_data.initial_deposit),
+            ),
+        )
+
+        return {
+            "status": "success",
+            "account_id": int(account.id),
+            "owner_name": safe_name,
+        }
     finally:
         db.close()
 
+
 @mcp.tool()
-def check_balance(account_id: int):
-    """Retrieves the current balance for a specific account ID."""
+def check_balance(input_data: AccountLookupInput) -> dict:
+    """
+    Retrieves account balance securely.
+    Structured response avoids unescaped variables.
+    """
+    if not _authorize(input_data.api_key):
+        return {"status": "error", "message": "Unauthorized access"}
+
     db = SessionLocal()
     try:
-        account = crud.get_account(db, account_id)
+        account = crud.get_account(db, input_data.account_id)
         if not account:
-            return "Account not found."
-        return f"Current Balance: ${account.balance}"
-    finally:
-        db.close()
+            return {"status": "error", "message": "Account not found"}
 
-@mcp.tool()
-def process_transaction(account_id: int, amount: float, transaction_type: str):
-    """Handles deposits or withdrawals. Use 'Deposit' or 'Withdrawal' as type."""
-    db = SessionLocal()
-    try:
-        if transaction_type.lower() == "withdrawal":
-            account = crud.get_account(db, account_id)
-            if account and account.balance < amount:
-                return "Transaction failed: Insufficient funds."
-            crud.update_balance(db, account_id, -amount, "Withdrawal")
-        else:
-            crud.update_balance(db, account_id, amount, "Deposit")
-        
-        return f"Successfully processed {transaction_type} of ${amount}."
-    finally:
-        db.close()
-
-@mcp.tool()
-def view_history(account_id: int):
-    """Returns a list of recent transactions for the account."""
-    db = SessionLocal()
-    try:
-        history = crud.get_transactions(db, account_id)
-        if not history:
-            return "No transaction history found."
-        return [f"{t.type}: ${t.amount} at {t.timestamp}" for t in history]
+        return {
+            "status": "success",
+            "account_id": int(account.id),
+            "balance": round(float(account.balance), 2),
+        }
     finally:
         db.close()
