@@ -3,9 +3,10 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Depends, HTTPException, Security
 from fastapi.security.api_key import APIKeyHeader
 from sqlalchemy.orm import Session
-
-from . import models, schemas, crud
-from .database import engine, get_db
+import models
+import schemas
+import crud
+from database import engine, get_db
 
 # ---------------- ENV ----------------
 

@@ -2,7 +2,7 @@ from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime
 from sqlalchemy.orm import relationship
 from datetime import datetime
 # Use a relative import to find database.py in the same folder
-from .database import Base
+from database import Base
 
 class Account(Base):
     __tablename__ = "accounts"

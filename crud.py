@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 
-# Relative imports
-from . import models, schemas
+import models
+import schemas
 
 
 def get_account(db: Session, account_id: int):
